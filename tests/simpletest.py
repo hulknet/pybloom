@@ -14,19 +14,9 @@ class SimpleTestCase(unittest.TestCase):
     FILTER_ERROR_RATE = 0.001
 
     def setUp(self):
-        # Convenience file-backed bloomfilter
-        self.tempfile = tempfile.NamedTemporaryFile(suffix='.bloom',
-                                                    delete=False)
-        self.bf = pybloomfilter.BloomFilter(self.FILTER_SIZE,
-                                            self.FILTER_ERROR_RATE,
-                                            self.tempfile.name)
-
         # Convenience memory-backed bloomfilter
         self.bf_mem = pybloomfilter.BloomFilter(self.FILTER_SIZE,
                                                 self.FILTER_ERROR_RATE)
-
-    def tearDown(self):
-        os.unlink(self.tempfile.name)
 
     def assertPropertiesPreserved(self, old_bf, new_bf):
         # Assert that a "new" BloomFilter has the same properties as an "old"
@@ -98,123 +88,20 @@ class SimpleTestCase(unittest.TestCase):
     def test_repr(self):
         self.assertEqual(
             '<BloomFilter capacity: %d, error: %0.3f, num_hashes: %d>' % (
-                self.bf.capacity, self.bf.error_rate, self.bf.num_hashes),
-            repr(self.bf))
+                self.bf_mem.capacity, self.bf_mem.error_rate, self.bf_mem.num_hashes),
+            repr(self.bf_mem))
         self.assertEqual(
             '<BloomFilter capacity: %d, error: %0.3f, num_hashes: %d>' % (
-                self.bf.capacity, self.bf.error_rate, self.bf.num_hashes),
-            str(self.bf))
+                self.bf_mem.capacity, self.bf_mem.error_rate, self.bf_mem.num_hashes),
+            str(self.bf_mem))
         self.assertEqual(
             '<BloomFilter capacity: %d, error: %0.3f, num_hashes: %d>' % (
-                self.bf.capacity, self.bf.error_rate, self.bf.num_hashes),
-            str(self.bf))
-
-    def test_filename(self):
-        # .name is pending deprecation, ensure .filename is equivalent
-        self.assertEqual(self.bf.name.decode(), self.bf.filename)
-
-    def test_add_and_check_file_backed(self):
-        self._populate_filter(self.bf)
-        self._check_filter_contents(self.bf)
-
-    def test_update_and_check_file_backed(self):
-        self._populate_filter(self.bf, use_update=True)
-        self._check_filter_contents(self.bf)
+                self.bf_mem.capacity, self.bf_mem.error_rate, self.bf_mem.num_hashes),
+            str(self.bf_mem))
 
     def test_add_and_check_memory_backed(self):
         self._populate_filter(self.bf_mem)
         self._check_filter_contents(self.bf_mem)
-
-    def test_open(self):
-        self._populate_filter(self.bf)
-        self.assertEqual(self.bf.read_only, False)
-        self.bf.sync()
-
-        # Read and write
-        bf1 = pybloomfilter.BloomFilter.open(self.bf.filename)
-        self._check_filter_contents(bf1)
-        self.assertEqual(bf1.read_only, False)
-
-        bf2 = pybloomfilter.BloomFilter.open(self.bf.filename, mode="rw")
-        self._check_filter_contents(bf2)
-        self.assertEqual(bf2.read_only, False)
-
-        # Read only
-        bfro = pybloomfilter.BloomFilter.open(self.bf.filename, mode="r")
-        self._check_filter_contents(bfro)
-        self.assertEqual(bfro.read_only, True)
-
-    def test_open_missing_file_is_os_error(self):
-        self.assertRaises(OSError, pybloomfilter.BloomFilter.open,
-                            "missing_directory/some_file.bloom", "r")
-        self.assertRaises(OSError, pybloomfilter.BloomFilter.open,
-                            "missing_directory/some_file.bloom", "rw")
-
-    def test_read_only_write_is_value_error(self):
-        bfro = pybloomfilter.BloomFilter.open(self.tempfile.name, mode="r")
-        self.assertEqual(bfro.read_only, True)
-        self.assertRaises(ValueError, bfro.add, "test")
-        self.assertRaises(ValueError, bfro.update, ["test"])
-        self.assertRaises(ValueError, bfro.sync)
-        self.assertRaises(ValueError, bfro.clear_all)
-
-    def test_read_only_set_operations_is_value_error(self):
-        bf_mem = pybloomfilter.BloomFilter(self.FILTER_SIZE,
-                                           self.FILTER_ERROR_RATE)
-
-        bfro = pybloomfilter.BloomFilter.open(self.tempfile.name, mode="r")
-        self.assertEqual(bfro.read_only, True)
-        self.assertRaises(ValueError, bfro.union, bf_mem)
-        self.assertRaises(ValueError, bfro.intersection, bf_mem)
-        self.assertRaises(ValueError, bfro.__ior__, bf_mem)
-        self.assertRaises(ValueError, bfro.__iand__, bf_mem)
-
-    @with_test_file
-    def test_copy(self, filename):
-        self._populate_filter(self.bf)
-        self.bf.sync()
-
-        bf = self.bf.copy(filename)
-        self._check_filter_contents(bf)
-        self.assertPropertiesPreserved(self.bf, bf)
-        self.assertEqual(bf.read_only, False)
-
-    def assertBfPermissions(self, bf, perms):
-        oct_mode = oct(os.stat(bf.filename).st_mode)
-        self.assertTrue(oct_mode.endswith(perms),
-                     'unexpected perms %s' % oct_mode)
-
-    @with_test_file
-    def test_to_from_base64(self, filename):
-        self._populate_filter(self.bf)
-        self.bf.sync()
-
-        # sanity-check
-        self.assertBfPermissions(self.bf, '0755')
-
-        b64 = self.bf.to_base64()
-
-        old_umask = os.umask(0)
-        try:
-            os.unlink(filename)
-            bf = pybloomfilter.BloomFilter.from_base64(filename, b64,
-                                                       perm=0o775)
-            self.assertBfPermissions(bf, '0775')
-            self._check_filter_contents(bf)
-            self.assertPropertiesPreserved(self.bf, bf)
-        finally:
-            os.umask(old_umask)
-
-    def test_missing_file_is_os_error(self):
-        self.assertRaises(OSError, pybloomfilter.BloomFilter, 1000, 0.1,
-                          'missing_directory/some_file.bloom')
-
-    @with_test_file
-    def test_others(self, filename):
-        bf = pybloomfilter.BloomFilter(100, 0.01, filename)
-        for elem in (1.2, 2343, (1, 2), object(), '\u2131\u3184'):
-            bf.add(elem)
-            self.assertEqual(elem in bf, True)
 
     def test_number_nofile(self):
         bf = pybloomfilter.BloomFilter(100, 0.01)
@@ -232,43 +119,6 @@ class SimpleTestCase(unittest.TestCase):
             bf.add(elem)
             self.assertEqual(elem in bf, True)
 
-    @with_test_file
-    def _test_large_file(self, filename):
-        bf = pybloomfilter.BloomFilter(400000000, 0.01, filename)
-        bf.add(1234)
-        self.assertEqual(1234 in bf, True)
-
-    def test_name_does_not_segfault(self):
-        bf = pybloomfilter.BloomFilter(100, 0.01)
-        self.assertRaises(NotImplementedError, lambda: bf.filename)
-
-    def test_copy_does_not_segfault(self):
-        bf = pybloomfilter.BloomFilter(100, 0.01)
-        with tempfile.NamedTemporaryFile(suffix='.bloom') as f2:
-            self.assertRaises(NotImplementedError, bf.copy, f2.name)
-
-    def test_to_base64_does_not_segfault(self):
-        bf = pybloomfilter.BloomFilter(100, 0.01)
-        self.assertRaises(NotImplementedError, bf.to_base64)
-
-    def test_copy_template(self):
-        self._populate_filter(self.bf)
-        with tempfile.NamedTemporaryFile() as _file:
-            bf2 = self.bf.copy_template(_file.name)
-            self.assertPropertiesPreserved(self.bf, bf2)
-            self.assertEqual(bf2.read_only, False)
-            bf2.union(self.bf)  # Asserts copied bloom filter is comparable
-            self._check_filter_contents(bf2)
-
-    def test_create_with_hash_seeds(self):
-        cust_seeds = [getrandbits(32) for i in range(30)]
-        bf = pybloomfilter.BloomFilter(self.FILTER_SIZE,
-                                       self.FILTER_ERROR_RATE,
-                                       self.tempfile.name,
-                                       hash_seeds=cust_seeds)
-        bf_seeds = bf.hash_seeds.tolist()
-        self.assertEqual(cust_seeds, bf_seeds)
-
     def test_create_with_hash_seeds_invalid(self):
         cust_seeds = ["ABC", -123, "123456", getrandbits(33)]
         self.assertRaises(ValueError,
@@ -280,15 +130,13 @@ class SimpleTestCase(unittest.TestCase):
     def test_create_with_hash_seeds_and_compare(self):
         test_data = "test"
         bf1 = pybloomfilter.BloomFilter(self.FILTER_SIZE,
-                                        self.FILTER_ERROR_RATE,
-                                        self.tempfile.name)
+                                        self.FILTER_ERROR_RATE)
         bf1.add(test_data)
         bf1_seeds = bf1.hash_seeds.tolist()
         bf1_ba = bf1.bit_array
 
         bf2 = pybloomfilter.BloomFilter(self.FILTER_SIZE,
                                         self.FILTER_ERROR_RATE,
-                                        self.tempfile.name,
                                         hash_seeds=bf1_seeds)
         bf2.add(test_data)
         bf2_seeds = bf2.hash_seeds.tolist()
@@ -300,7 +148,7 @@ class SimpleTestCase(unittest.TestCase):
         self.assertEqual(bf1_ba, bf2_ba)
 
     def test_bit_array(self):
-        bf = pybloomfilter.BloomFilter(1000, 0.01, self.tempfile.name)
+        bf = pybloomfilter.BloomFilter(1000, 0.01)
         bf.add("apple")
 
         # Count the number of 1s
@@ -341,7 +189,7 @@ class SimpleTestCase(unittest.TestCase):
             items.append(randint(0, 1000))
 
         # File-backed
-        bf1 = pybloomfilter.BloomFilter(capacity, 0.01, self.tempfile.name)
+        bf1 = pybloomfilter.BloomFilter(capacity, 0.01)
         bf1.update(items)
 
         bf1_hs = bf1.hash_seeds
@@ -385,19 +233,21 @@ class SimpleTestCase(unittest.TestCase):
         assert bf100.bit_count == bin(bf100.bit_array).count('1')
 
     def test_approximate_size_after_union_called(self):
-        bf1 = pybloomfilter.BloomFilter(100, 0.1, self.tempfile.name,
-                                        hash_seeds=[1, 2, 3])
+        bf1 = pybloomfilter.BloomFilter(100, 0.1, hash_seeds=[1, 2, 3])
         for i in range(0, 20):
             bf1.add(str(i))
-        bf2 = pybloomfilter.BloomFilter(100, 0.1, self.tempfile.name + '.50',
-                                        hash_seeds=[1, 2, 3])
+        bf_union = pybloomfilter.BloomFilter(100, 0.1, hash_seeds=[1, 2, 3])
+        for i in range(0, 20):
+            bf_union.add(str(i))
+
+        bf2 = pybloomfilter.BloomFilter(100, 0.1, hash_seeds=[1, 2, 3])
         for i in range(10, 30):  # intersectoin size: 10
             bf2.add(str(i))
-        union_bf = bf1.copy(self.tempfile.name + '.union')
-        union_bf.union(bf2)
 
-        assert len(union_bf) == 29  # approximate size
-        intersection = len(bf1) + len(bf2) - len(union_bf)
+        bf_union.union(bf2)
+
+        assert len(bf_union) == 29  # approximate size
+        intersection = len(bf1) + len(bf2) - len(bf_union)
         assert intersection == 11  # approximate size
 
 

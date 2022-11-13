@@ -22,21 +22,8 @@ There are a couple reasons to use this module:
 
 ## Quickstart
 
-After you install, the interface to use is a cross between a file
-interface and an ste interface. As an example:
-```python
-    >>> import pybloomfilter
-    >>> fruit = pybloomfilter.BloomFilter(100000, 0.1, '/tmp/words.bloom')
-    >>> fruit.update(('apple', 'pear', 'orange', 'apple'))
-    >>> len(fruit)
-    3
-    >>> 'mike' in fruit
-    False
-    >>> 'apple' in fruit
-    True
-```
 
-To create an in-memory filter, simply omit the file location:
+To create an in-memory filter:
 ```python
     >>> fruit2 = pybloomfilter.BloomFilter(10000, 0.1)
     >>> fruit2.add('apple')
